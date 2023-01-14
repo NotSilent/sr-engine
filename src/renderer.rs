@@ -351,10 +351,10 @@ impl Renderer {
             command_pool,
             "sphere",
             vec![
-                Vertex::new(-0.5, 0.5, 0.0),
-                Vertex::new(-0.5, -0.5, 0.0),
-                Vertex::new(0.5, 0.5, 0.0),
-                Vertex::new(0.5, -0.5, 0.0),
+                Vertex::new(-0.5, 0.0, 0.5),
+                Vertex::new(-0.5, 0.0, -0.5),
+                Vertex::new(0.5, 0.0, 0.5),
+                Vertex::new(0.5, 0.0, -0.5),
             ],
             vec![0, 1, 2, 2, 1, 3],
         );
@@ -383,9 +383,9 @@ impl Renderer {
             pipeline_layout,
             pipeline,
             camera: Camera::new(
-                0.0,
+                5.0,
                 -10.0,
-                0.0,
+                5.0,
                 width as f32,
                 height as f32,
                 f32::pi() / 2.0,
@@ -494,7 +494,7 @@ impl Renderer {
             let model = Matrix4::identity();
             let push_constants_data = PushConstantsData::new(
                 &model,
-                self.camera.get_view(),
+                &self.camera.get_view(),
                 self.camera.get_projection(),
             );
 

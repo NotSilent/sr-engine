@@ -1,12 +1,23 @@
-use nalgebra::{Matrix4, Vector3};
+use nalgebra::{Matrix4, Transform, Transform3, Vector3};
+use std::mem::transmute;
 
 // 1/((w/h)tan(theta/2))) 0            0       0
 // 0                      tan(theta/2) 0       0
 // 0                      0            f/(f-n) -fn/(f-n)
 // 0                      0            1       0
 
+// Vulkan
+// x right
+// y bottom
+// z forward
+//
+// Engine
+// x right
+// y forward
+// z up
+
 pub struct Camera {
-    view: Matrix4<f32>,
+    transform: Matrix4<f32>,
     projection: Matrix4<f32>,
 }
 
@@ -21,11 +32,11 @@ impl Camera {
         near: f32,
         far: f32,
     ) -> Self {
-        let mut view = Matrix4::new_translation(&Vector3::new(x, y, z));
-        view.append_nonuniform_scaling_mut(&Vector3::new(1.0, -1.0, -1.0));
+        let mut transform = Matrix4::new_scaling(1.0);
+        transform.append_translation_mut(&Vector3::new(x, y, z));
 
         Self {
-            view,
+            transform,
             projection: Self::calculate_projection(width, height, fov, near, far),
         }
     }
@@ -61,7 +72,11 @@ impl Camera {
         &self.projection
     }
 
-    pub fn get_view(&self) -> &Matrix4<f32> {
-        &self.view
+    pub fn get_view(&self) -> Matrix4<f32> {
+        static TO_VULKAN_COORDINATE_SYSTEM: Matrix4<f32> = Matrix4::new(
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        );
+
+        TO_VULKAN_COORDINATE_SYSTEM * self.transform.try_inverse().unwrap()
     }
 }
