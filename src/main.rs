@@ -1,3 +1,5 @@
+extern crate core;
+
 use winit::dpi::PhysicalSize;
 use winit::{
     event::{Event, WindowEvent},
@@ -7,8 +9,14 @@ use winit::{
 
 use crate::renderer::Renderer;
 
+mod buffer;
+mod camera;
+mod command_buffer;
+mod mesh;
 mod pipeline;
+mod push_constants_data;
 mod renderer;
+mod vertex;
 
 fn main() {
     let event_loop = EventLoop::new();
@@ -36,10 +44,10 @@ fn main() {
             Event::UserEvent(_) => {}
             Event::Suspended => {}
             Event::Resumed => {}
-            Event::MainEventsCleared => {}
-            Event::RedrawRequested(_) => {
+            Event::MainEventsCleared => {
                 renderer.render();
             }
+            Event::RedrawRequested(_) => {}
             Event::RedrawEventsCleared => {}
             Event::LoopDestroyed => {}
         }

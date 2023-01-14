@@ -1,3 +1,4 @@
+use crate::vertex::Vertex;
 use ash::util;
 use ash::vk::Rect2D;
 use ash::{vk, Device};
@@ -68,20 +69,18 @@ impl Pipeline {
                 .build(),
         ];
 
-        let vertex_binding_descriptions: [vk::VertexInputBindingDescription; 0] = [];
-        // [vk::VertexInputBindingDescription::builder()
-        // .binding(0)
-        // .input_rate(vk::VertexInputRate::VERTEX)
-        // .stride(mem::size_of::<f32>() as u32)
-        // .build()];
+        let vertex_binding_descriptions = [vk::VertexInputBindingDescription::builder()
+            .binding(0)
+            .input_rate(vk::VertexInputRate::VERTEX)
+            .stride(std::mem::size_of::<Vertex>() as u32)
+            .build()];
 
-        let vertex_attribute_descriptions: [vk::VertexInputAttributeDescription; 0] = [];
-        // = [vk::VertexInputAttributeDescription::builder()
-        // .format(vk::Format::R32G32_SFLOAT)
-        // .binding(0)
-        // .location(0)
-        // .offset(0)
-        // .build()];
+        let vertex_attribute_descriptions = [vk::VertexInputAttributeDescription::builder()
+            .format(vk::Format::R32G32B32_SFLOAT)
+            .binding(0)
+            .location(0)
+            .offset(0)
+            .build()];
 
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_attribute_descriptions(&vertex_attribute_descriptions)
@@ -181,6 +180,11 @@ impl Pipeline {
                 .create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None)
                 .unwrap()
         };
+
+        unsafe {
+            device.destroy_shader_module(vertex_module, None);
+            device.destroy_shader_module(fragment_module, None);
+        }
 
         Pipeline {
             handle: pipeline[0],

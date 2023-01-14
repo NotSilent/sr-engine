@@ -1,9 +1,16 @@
+use crate::buffer::VulkanResource;
+use crate::camera::Camera;
+use crate::command_buffer::CommandBuffer;
+use crate::mesh::Mesh;
 use crate::pipeline::Pipeline;
+use crate::push_constants_data::PushConstantsData;
+use crate::vertex::Vertex;
 use ash::extensions::ext::DebugUtils;
 use ash::extensions::khr::{Surface, Swapchain};
-use ash::vk::Rect2D;
 use ash::{vk, Device, Entry, Instance};
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
+use gpu_allocator::AllocatorDebugSettings;
+use nalgebra::{Matrix4, RealField};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::borrow::Cow;
 use std::ffi::CStr;
@@ -18,7 +25,7 @@ pub struct Renderer {
     swapchain_loader: Swapchain,
 
     surface: vk::SurfaceKHR,
-    surface_format: vk::SurfaceFormatKHR,
+    _surface_format: vk::SurfaceFormatKHR,
     swapchain: vk::SwapchainKHR,
     swapchain_images: Vec<vk::Image>,
     swapchain_image_views: Vec<vk::ImageView>,
@@ -26,7 +33,7 @@ pub struct Renderer {
     _physical_device: vk::PhysicalDevice,
 
     _debug_utils_messenger: vk::DebugUtilsMessengerEXT,
-    _allocator: Allocator,
+    allocator: std::mem::ManuallyDrop<Allocator>, // Could be Option?
 
     graphics_queue_family_index: u32,
     graphics_queue: vk::Queue,
@@ -36,10 +43,12 @@ pub struct Renderer {
     render_area: vk::Rect2D,
 
     descriptor_set_layout: vk::DescriptorSetLayout,
-    descriptor_set: vk::DescriptorSet,
-
+    //descriptor_set: vk::DescriptorSet,
     pipeline_layout: vk::PipelineLayout,
     pipeline: Pipeline,
+
+    camera: Camera,
+    mesh: Mesh,
 }
 
 impl Renderer {
@@ -180,7 +189,7 @@ impl Renderer {
         swapchain: &Swapchain,
         surface: vk::SurfaceKHR,
         surface_format: vk::SurfaceFormatKHR,
-        render_area: Rect2D,
+        render_area: vk::Rect2D,
     ) -> vk::SwapchainKHR {
         let create_info = vk::SwapchainCreateInfoKHR::builder()
             .surface(surface)
@@ -207,11 +216,20 @@ impl Renderer {
         device: &Device,
         physical_device: vk::PhysicalDevice,
     ) -> Allocator {
+        let debug_settings = AllocatorDebugSettings {
+            log_allocations: true,
+            log_frees: true,
+            log_leaks_on_shutdown: true,
+            log_stack_traces: true,
+            log_memory_information: true,
+            store_stack_traces: true,
+        };
+
         Allocator::new(&AllocatorCreateDesc {
             instance: instance.clone(),
             device: device.clone(),
             physical_device,
-            debug_settings: Default::default(),
+            debug_settings,
             buffer_device_address: false,
         })
         .unwrap()
@@ -242,8 +260,10 @@ impl Renderer {
     }
 
     pub fn new(window: &Window) -> Self {
+        let width = 1920;
+        let height = 1080;
         let render_area = vk::Rect2D::builder()
-            .extent(vk::Extent2D::builder().width(1920).height(1080).build())
+            .extent(vk::Extent2D::builder().width(width).height(height).build())
             .build();
 
         let entry = Entry::linked();
@@ -309,12 +329,12 @@ impl Renderer {
 
         let graphics_queue = unsafe { device.get_device_queue(graphics_queue_family_index, 0) };
 
-        let allocator = Self::create_allocator(&instance, &device, physical_device);
+        let mut allocator = Self::create_allocator(&instance, &device, physical_device);
 
         let command_pool = Self::create_command_pool(&device, graphics_queue_family_index);
 
         let descriptor_set_layout = Self::create_descriptor_set_layout(&device);
-        let descriptor_set = vk::DescriptorSet::default(); //Self::create_descriptor_set();
+        //let descriptor_set = vk::DescriptorSet::default(); //Self::create_descriptor_set();
 
         let pipeline_layout = Self::create_pipeline_layout(&device, &[descriptor_set_layout]);
         let pipeline = Pipeline::new(
@@ -322,6 +342,21 @@ impl Renderer {
             pipeline_layout,
             render_area,
             &[surface_format.format],
+        );
+
+        let mesh = Mesh::new(
+            &device,
+            &mut allocator,
+            graphics_queue,
+            command_pool,
+            "sphere",
+            vec![
+                Vertex::new(-0.5, 0.5, 0.0),
+                Vertex::new(-0.5, -0.5, 0.0),
+                Vertex::new(0.5, 0.5, 0.0),
+                Vertex::new(0.5, -0.5, 0.0),
+            ],
+            vec![0, 1, 2, 2, 1, 3],
         );
 
         Self {
@@ -332,21 +367,32 @@ impl Renderer {
             surface_loader,
             swapchain_loader,
             surface,
-            surface_format,
+            _surface_format: surface_format,
             swapchain,
             swapchain_images,
             swapchain_image_views,
             _physical_device: physical_device,
             _debug_utils_messenger: debug_utils_messenger,
-            _allocator: allocator,
-            graphics_queue_family_index: graphics_queue_family_index,
+            allocator: std::mem::ManuallyDrop::new(allocator),
+            graphics_queue_family_index,
             graphics_queue,
             command_pool,
             render_area,
             descriptor_set_layout,
-            descriptor_set,
+            //descriptor_set,
             pipeline_layout,
             pipeline,
+            camera: Camera::new(
+                0.0,
+                -10.0,
+                0.0,
+                width as f32,
+                height as f32,
+                f32::pi() / 2.0,
+                0.1,
+                100.0,
+            ),
+            mesh,
         }
     }
 
@@ -378,7 +424,11 @@ impl Renderer {
     ) -> vk::PipelineLayout {
         let create_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(descriptor_set_layouts)
-            //.push_constant_ranges(&[])
+            .push_constant_ranges(&[vk::PushConstantRange::builder()
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .offset(0)
+                .size(std::mem::size_of::<PushConstantsData>() as u32)
+                .build()])
             .build();
 
         unsafe { device.create_pipeline_layout(&create_info, None).unwrap() }
@@ -424,69 +474,76 @@ impl Renderer {
         unsafe {
             self.device.begin_command_buffer(cmd, &begin_info).unwrap();
 
-            self.device.cmd_pipeline_barrier(
+            CommandBuffer::pipeline_barrier(
+                &self.device,
                 cmd,
                 vk::PipelineStageFlags::TOP_OF_PIPE,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[vk::ImageMemoryBarrier::builder()
-                    .src_access_mask(vk::AccessFlags::NONE)
-                    .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                    .old_layout(vk::ImageLayout::UNDEFINED)
-                    .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                    .src_queue_family_index(self.graphics_queue_family_index)
-                    .dst_queue_family_index(self.graphics_queue_family_index)
-                    .image(image)
-                    .subresource_range(
-                        vk::ImageSubresourceRange::builder()
-                            .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .base_mip_level(0)
-                            .level_count(1)
-                            .base_array_layer(0)
-                            .layer_count(1)
-                            .build(),
-                    )
-                    .build()],
+                vk::AccessFlags::NONE,
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                self.graphics_queue_family_index,
+                self.graphics_queue_family_index,
+                image,
+                vk::ImageAspectFlags::COLOR,
             );
 
             self.device.cmd_begin_rendering(cmd, &rendering_info);
+
+            let model = Matrix4::identity();
+            let push_constants_data = PushConstantsData::new(
+                &model,
+                self.camera.get_view(),
+                self.camera.get_projection(),
+            );
+
+            self.device.cmd_push_constants(
+                cmd,
+                self.pipeline_layout,
+                vk::ShaderStageFlags::VERTEX,
+                0,
+                push_constants_data.get(),
+            );
+
+            //self.device.cmd_bind_vertex_buffers(self.triangle_buffer);
 
             self.device.cmd_bind_pipeline(
                 cmd,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline.get(),
             );
-            self.device.cmd_draw(cmd, 3, 1, 0, 0);
+
+            self.device.cmd_bind_vertex_buffers(
+                cmd,
+                0,
+                &[self.mesh.get_vertex_buffer().buffer],
+                &[0],
+            );
+            self.device.cmd_bind_index_buffer(
+                cmd,
+                self.mesh.get_index_buffer().buffer,
+                0,
+                vk::IndexType::UINT16,
+            );
+
+            self.device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
 
             self.device.cmd_end_rendering(cmd);
 
-            self.device.cmd_pipeline_barrier(
+            CommandBuffer::pipeline_barrier(
+                &self.device,
                 cmd,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[vk::ImageMemoryBarrier::builder()
-                    .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                    .dst_access_mask(vk::AccessFlags::NONE)
-                    .old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                    .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                    .src_queue_family_index(self.graphics_queue_family_index)
-                    .dst_queue_family_index(self.graphics_queue_family_index)
-                    .image(image)
-                    .subresource_range(
-                        vk::ImageSubresourceRange::builder()
-                            .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .base_mip_level(0)
-                            .level_count(1)
-                            .base_array_layer(0)
-                            .layer_count(1)
-                            .build(),
-                    )
-                    .build()],
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::AccessFlags::NONE,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::ImageLayout::PRESENT_SRC_KHR,
+                self.graphics_queue_family_index,
+                self.graphics_queue_family_index,
+                image,
+                vk::ImageAspectFlags::COLOR,
             );
 
             self.device.end_command_buffer(cmd).unwrap();
@@ -496,13 +553,14 @@ impl Renderer {
     }
 
     pub fn render(&self) {
-        let acquire_image_semaphore = self.create_semaphore();
-        let queue_submit_semaphore = self.create_semaphore();
+        unsafe {
+            let acquire_image_semaphore = self.create_semaphore();
+            let queue_submit_semaphore = self.create_semaphore();
 
-        let fence = self.create_fence();
+            let fence = self.create_fence();
 
-        let image_indices = unsafe {
-            self.swapchain_loader
+            let image_indices = self
+                .swapchain_loader
                 .acquire_next_image(
                     self.swapchain,
                     u64::MAX,
@@ -510,28 +568,26 @@ impl Renderer {
                     vk::Fence::null(),
                 )
                 .unwrap()
-                .0
-        };
+                .0;
 
-        let cmd = self.record_command_buffer(
-            self.swapchain_images[image_indices as usize],
-            self.swapchain_image_views[image_indices as usize],
-        );
+            let cmd = self.record_command_buffer(
+                self.swapchain_images[image_indices as usize],
+                self.swapchain_image_views[image_indices as usize],
+            );
 
-        let submit_info = vk::SubmitInfo::builder()
-            .command_buffers(&[cmd])
-            .signal_semaphores(&[queue_submit_semaphore])
-            .wait_semaphores(&[acquire_image_semaphore])
-            .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
-            .build();
+            let submit_info = vk::SubmitInfo::builder()
+                .command_buffers(&[cmd])
+                .signal_semaphores(&[queue_submit_semaphore])
+                .wait_semaphores(&[acquire_image_semaphore])
+                .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+                .build();
 
-        let present_info = vk::PresentInfoKHR::builder()
-            .wait_semaphores(&[queue_submit_semaphore])
-            .swapchains(&[self.swapchain])
-            .image_indices(&[image_indices])
-            .build();
+            let present_info = vk::PresentInfoKHR::builder()
+                .wait_semaphores(&[queue_submit_semaphore])
+                .swapchains(&[self.swapchain])
+                .image_indices(&[image_indices])
+                .build();
 
-        unsafe {
             self.device
                 .queue_submit(self.graphics_queue, &[submit_info], fence)
                 .expect("Couldn't submit");
@@ -539,6 +595,50 @@ impl Renderer {
             self.swapchain_loader
                 .queue_present(self.graphics_queue, &present_info)
                 .expect("Couldn't present");
-        };
+
+            self.device
+                .wait_for_fences(&[fence], true, u64::MAX)
+                .unwrap();
+
+            self.device.destroy_semaphore(acquire_image_semaphore, None);
+            self.device.destroy_semaphore(queue_submit_semaphore, None);
+            self.device.destroy_fence(fence, None);
+
+            self.device.free_command_buffers(self.command_pool, &[cmd]);
+        }
+    }
+}
+
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        self.mesh.release(&self.device, &mut self.allocator);
+
+        println!("{:?}", &self.allocator);
+
+        unsafe {
+            self.device.destroy_pipeline(self.pipeline.get(), None);
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+
+            self.device
+                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+
+            for &image_view in self.swapchain_image_views.iter() {
+                self.device.destroy_image_view(image_view, None);
+            }
+
+            self.device.destroy_command_pool(self.command_pool, None);
+
+            self.swapchain_loader
+                .destroy_swapchain(self.swapchain, None);
+            self.surface_loader.destroy_surface(self.surface, None);
+
+            std::mem::ManuallyDrop::drop(&mut self.allocator);
+
+            self.device.destroy_device(None);
+            self._debug_utils
+                .destroy_debug_utils_messenger(self._debug_utils_messenger, None);
+            self._instance.destroy_instance(None);
+        }
     }
 }
