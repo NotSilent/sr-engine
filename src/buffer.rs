@@ -1,5 +1,5 @@
 use ash::{vk, Device};
-use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
+use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator};
 use gpu_allocator::MemoryLocation;
 use std::intrinsics::copy_nonoverlapping;
 
@@ -22,10 +22,9 @@ impl Buffer {
         unsafe {
             let buffer_size = (data.len() * std::mem::size_of::<T>()) as vk::DeviceSize;
 
-            let staging_buffer_create_info = vk::BufferCreateInfo::builder()
+            let staging_buffer_create_info = vk::BufferCreateInfo::default()
                 .size(buffer_size)
-                .usage(usage | vk::BufferUsageFlags::TRANSFER_SRC)
-                .build();
+                .usage(usage | vk::BufferUsageFlags::TRANSFER_SRC);
 
             let staging_buffer = device
                 .create_buffer(&staging_buffer_create_info, None)
@@ -39,6 +38,7 @@ impl Buffer {
                     requirements,
                     location: MemoryLocation::CpuToGpu,
                     linear: true, // Buffers are always linear
+                    allocation_scheme: AllocationScheme::GpuAllocatorManaged,
                 })
                 .unwrap();
 
@@ -60,10 +60,9 @@ impl Buffer {
                 data.len(),
             );
 
-            let buffer_create_info = vk::BufferCreateInfo::builder()
+            let buffer_create_info = vk::BufferCreateInfo::default()
                 .size(buffer_size)
-                .usage(usage | vk::BufferUsageFlags::TRANSFER_DST)
-                .build();
+                .usage(usage | vk::BufferUsageFlags::TRANSFER_DST);
 
             let buffer = device.create_buffer(&buffer_create_info, None).unwrap();
 
@@ -75,6 +74,7 @@ impl Buffer {
                     requirements,
                     location: MemoryLocation::GpuOnly,
                     linear: true, // Buffers are always linear
+                    allocation_scheme: AllocationScheme::GpuAllocatorManaged,
                 })
                 .unwrap();
 
@@ -82,34 +82,30 @@ impl Buffer {
                 .bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
                 .unwrap();
 
-            let allocate_info = vk::CommandBufferAllocateInfo::builder()
+            let allocate_info = vk::CommandBufferAllocateInfo::default()
                 .command_pool(command_pool)
                 .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(1)
-                .build();
+                .command_buffer_count(1);
 
             let command_buffers = device.allocate_command_buffers(&allocate_info).unwrap();
             let cmd = command_buffers[0];
 
-            let begin_info = vk::CommandBufferBeginInfo::builder()
-                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-                .build();
+            let begin_info = vk::CommandBufferBeginInfo::default()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
             device.begin_command_buffer(cmd, &begin_info).unwrap();
             device.cmd_copy_buffer(
                 cmd,
                 staging_buffer,
                 buffer,
-                &[vk::BufferCopy::builder().size(buffer_size).build()],
+                &[vk::BufferCopy::default().size(buffer_size)],
             );
             device.end_command_buffer(cmd).unwrap();
 
             device
                 .queue_submit(
                     queue,
-                    &[vk::SubmitInfo::builder()
-                        .command_buffers(&command_buffers)
-                        .build()],
+                    &[vk::SubmitInfo::default().command_buffers(&command_buffers)],
                     vk::Fence::null(),
                 )
                 .unwrap();

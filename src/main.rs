@@ -1,11 +1,10 @@
 extern crate core;
 
+use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::{
-    event::{Event, WindowEvent},
-    event_loop::EventLoop,
-    window::WindowBuilder,
-};
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::window::{Window, WindowAttributes, WindowId};
+use winit::{event::WindowEvent, event_loop::EventLoop};
 
 use crate::renderer::Renderer;
 
@@ -18,38 +17,71 @@ mod push_constants_data;
 mod renderer;
 mod vertex;
 
-fn main() {
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_inner_size(PhysicalSize {
-            width: 1920,
-            height: 1080,
-        })
-        .build(&event_loop)
-        .unwrap();
+#[derive(Default)]
+struct State {
+    window: Option<Window>,
+    renderer: Option<Renderer>,
+}
 
-    let renderer = Renderer::new(&window);
+impl State {
+    fn create_renderer(&mut self, window: &Window) {
+        self.renderer = Some(Renderer::new(window));
+    }
+}
 
-    event_loop.run(move |event, _, control_flow| {
-        //control_flow.set_poll();
+impl ApplicationHandler for State {
+    // This is a common indicator that you can create a window.
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_none() {
+            let window = event_loop
+                .create_window(
+                    Window::default_attributes()
+                        .with_inner_size(PhysicalSize::new(1920, 1080))
+                        .with_resizable(false),
+                )
+                .ok();
+
+            if let Some(window) = &window {
+                self.create_renderer(window);
+            }
+
+            self.window = window;
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        // `unwrap` is fine, the window will always be available when
+        // receiving a window event.
+        let _window = self.window.as_ref().unwrap();
 
         match event {
-            Event::NewEvents(_) => {}
-            Event::WindowEvent { event, .. } => {
-                if let WindowEvent::CloseRequested = event {
-                    control_flow.set_exit();
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+            }
+            WindowEvent::RedrawRequested => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.render();
                 }
+                _window.request_redraw();
             }
-            Event::DeviceEvent { .. } => {}
-            Event::UserEvent(_) => {}
-            Event::Suspended => {}
-            Event::Resumed => {}
-            Event::MainEventsCleared => {
-                renderer.render();
-            }
-            Event::RedrawRequested(_) => {}
-            Event::RedrawEventsCleared => {}
-            Event::LoopDestroyed => {}
+            _ => (),
         }
-    });
+    }
+
+    // fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    //     let window = self.window.as_ref().unwrap();
+    //     window.request_redraw();
+    // }
+}
+
+fn main() {
+    let event_loop = EventLoop::new().unwrap();
+    event_loop.set_control_flow(ControlFlow::Poll);
+    let mut state = State::default();
+    let _ = event_loop.run_app(&mut state);
 }

@@ -1,5 +1,4 @@
-use nalgebra::{Matrix4, Transform, Transform3, Vector3};
-use std::mem::transmute;
+use nalgebra::{Matrix4, Vector3};
 
 // 1/((w/h)tan(theta/2))) 0            0       0
 // 0                      tan(theta/2) 0       0

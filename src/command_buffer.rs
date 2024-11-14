@@ -25,7 +25,7 @@ impl CommandBuffer {
                 vk::DependencyFlags::empty(),
                 &[],
                 &[],
-                &[vk::ImageMemoryBarrier::builder()
+                &[vk::ImageMemoryBarrier::default()
                     .src_access_mask(src_access_mask)
                     .dst_access_mask(dst_access_mask)
                     .old_layout(old_layout)
@@ -34,15 +34,13 @@ impl CommandBuffer {
                     .dst_queue_family_index(dst_queue_family_index)
                     .image(image)
                     .subresource_range(
-                        vk::ImageSubresourceRange::builder()
+                        vk::ImageSubresourceRange::default()
                             .aspect_mask(aspect_mask)
                             .base_mip_level(0)
                             .level_count(1)
                             .base_array_layer(0)
-                            .layer_count(1)
-                            .build(),
-                    )
-                    .build()],
+                            .layer_count(1),
+                    )],
             )
         };
     }

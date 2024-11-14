@@ -34,9 +34,7 @@ impl Pipeline {
         shader_stage: vk::ShaderStageFlags,
     ) -> vk::ShaderModule {
         let code = Self::load_shader_code(name, shader_stage);
-        let create_info = vk::ShaderModuleCreateInfo::builder()
-            .code(&code[..])
-            .build();
+        let create_info = vk::ShaderModuleCreateInfo::default().code(&code[..]);
 
         unsafe { device.create_shader_module(&create_info, None).unwrap() }
     }
@@ -47,9 +45,8 @@ impl Pipeline {
         render_area: Rect2D,
         color_attachment_formats: &[vk::Format],
     ) -> Pipeline {
-        let mut pipeline_rendering_create_info = vk::PipelineRenderingCreateInfo::builder()
-            .color_attachment_formats(color_attachment_formats)
-            .build();
+        let mut pipeline_rendering_create_info = vk::PipelineRenderingCreateInfo::default()
+            .color_attachment_formats(color_attachment_formats);
 
         let vertex_module =
             Self::create_shader_module(&device, "base", vk::ShaderStageFlags::VERTEX);
@@ -57,55 +54,51 @@ impl Pipeline {
             Self::create_shader_module(&device, "base", vk::ShaderStageFlags::FRAGMENT);
 
         let pipeline_stages = [
-            vk::PipelineShaderStageCreateInfo::builder()
+            vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::VERTEX)
                 .module(vertex_module)
-                .name(unsafe { CStr::from_bytes_with_nul_unchecked(b"main\0") })
-                .build(),
-            vk::PipelineShaderStageCreateInfo::builder()
+                .name(unsafe { CStr::from_bytes_with_nul_unchecked(b"main\0") }),
+            vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(fragment_module)
-                .name(unsafe { CStr::from_bytes_with_nul_unchecked(b"main\0") })
-                .build(),
+                .name(unsafe { CStr::from_bytes_with_nul_unchecked(b"main\0") }),
         ];
 
-        let vertex_binding_descriptions = [vk::VertexInputBindingDescription::builder()
+        let vertex_binding_descriptions = [vk::VertexInputBindingDescription::default()
             .binding(0)
             .input_rate(vk::VertexInputRate::VERTEX)
-            .stride(std::mem::size_of::<Vertex>() as u32)
-            .build()];
+            .stride(std::mem::size_of::<Vertex>() as u32)];
 
-        let vertex_attribute_descriptions = [vk::VertexInputAttributeDescription::builder()
+        let vertex_attribute_descriptions = [vk::VertexInputAttributeDescription::default()
             .format(vk::Format::R32G32B32_SFLOAT)
             .binding(0)
             .location(0)
-            .offset(0)
-            .build()];
+            .offset(0)];
 
-        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
+        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_attribute_descriptions(&vertex_attribute_descriptions)
-            .vertex_binding_descriptions(&vertex_binding_descriptions)
-            .build();
+            .vertex_binding_descriptions(&vertex_binding_descriptions);
 
-        let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-            .build();
+        let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
+            .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
 
         let tesselation_state = vk::PipelineTessellationStateCreateInfo::default();
 
-        let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
-            .scissors(&[render_area])
-            .viewports(&[vk::Viewport::builder()
-                .x(0.0)
-                .y(0.0)
-                .width(render_area.extent.width as f32)
-                .height(render_area.extent.height as f32)
-                .min_depth(0.0)
-                .max_depth(1.0)
-                .build()])
-            .build();
+        let scissors = [render_area];
 
-        let rasterization_state = vk::PipelineRasterizationStateCreateInfo::builder()
+        let viewports = [vk::Viewport::default()
+            .x(0.0)
+            .y(0.0)
+            .width(render_area.extent.width as f32)
+            .height(render_area.extent.height as f32)
+            .min_depth(0.0)
+            .max_depth(1.0)];
+
+        let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+            .scissors(&scissors)
+            .viewports(&viewports);
+
+        let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
             .depth_clamp_enable(false)
             .rasterizer_discard_enable(false)
             .polygon_mode(vk::PolygonMode::FILL)
@@ -115,19 +108,17 @@ impl Pipeline {
             .depth_bias_constant_factor(0.0)
             .depth_bias_clamp(0.0)
             .depth_bias_slope_factor(0.0)
-            .line_width(1.0)
-            .build();
+            .line_width(1.0);
 
-        let multisample_state = vk::PipelineMultisampleStateCreateInfo::builder()
+        let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
             .rasterization_samples(vk::SampleCountFlags::TYPE_1)
             .sample_shading_enable(false)
             .min_sample_shading(0.0)
             //.sample_mask()
             .alpha_to_coverage_enable(false)
-            .alpha_to_one_enable(false)
-            .build();
+            .alpha_to_one_enable(false);
 
-        let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::builder()
+        let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(false)
             .depth_write_enable(false)
             .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
@@ -136,10 +127,9 @@ impl Pipeline {
             .front(vk::StencilOpState::default())
             .back(vk::StencilOpState::default())
             .min_depth_bounds(0.0)
-            .max_depth_bounds(1.0)
-            .build();
+            .max_depth_bounds(1.0);
 
-        let color_blend_attachments = [vk::PipelineColorBlendAttachmentState::builder()
+        let color_blend_attachments = [vk::PipelineColorBlendAttachmentState::default()
             .blend_enable(false)
             .src_color_blend_factor(vk::BlendFactor::SRC_COLOR)
             .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_DST_COLOR)
@@ -147,19 +137,17 @@ impl Pipeline {
             .src_alpha_blend_factor(vk::BlendFactor::ZERO)
             .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
             .alpha_blend_op(vk::BlendOp::ADD)
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .build()];
+            .color_write_mask(vk::ColorComponentFlags::RGBA)];
 
-        let color_blending_state = vk::PipelineColorBlendStateCreateInfo::builder()
+        let color_blending_state = vk::PipelineColorBlendStateCreateInfo::default()
             .logic_op_enable(false)
             .logic_op(vk::LogicOp::CLEAR)
             .attachments(&color_blend_attachments)
-            .blend_constants([0.0, 0.0, 0.0, 0.0])
-            .build();
+            .blend_constants([0.0, 0.0, 0.0, 0.0]);
 
         let dynamic_state = vk::PipelineDynamicStateCreateInfo::default();
 
-        let create_info = vk::GraphicsPipelineCreateInfo::builder()
+        let create_info = vk::GraphicsPipelineCreateInfo::default()
             .push_next(&mut pipeline_rendering_create_info)
             .flags(vk::PipelineCreateFlags::empty())
             .stages(&pipeline_stages)
@@ -172,8 +160,7 @@ impl Pipeline {
             .depth_stencil_state(&depth_stencil_state)
             .color_blend_state(&color_blending_state)
             .dynamic_state(&dynamic_state)
-            .layout(pipeline_layout)
-            .build();
+            .layout(pipeline_layout);
 
         let pipeline = unsafe {
             device
