@@ -37,7 +37,7 @@ impl Buffer {
                     name: &format!("{}_staging", name),
                     requirements,
                     location: MemoryLocation::CpuToGpu,
-                    linear: true, // Buffers are always linear
+                    linear: true,
                     allocation_scheme: AllocationScheme::GpuAllocatorManaged,
                 })
                 .unwrap();

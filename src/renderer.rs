@@ -1,8 +1,11 @@
 use crate::buffer::VulkanResource;
 use crate::camera::Camera;
 use crate::command_buffer::CommandBuffer;
+use crate::draw_data::{self, DrawData};
+use crate::frame_worker::FrameWorker;
 use crate::mesh::Mesh;
 use crate::pipeline::Pipeline;
+use crate::pipeline_manager::{self, PipelineManager};
 use crate::push_constants_data::PushConstantsData;
 use crate::vertex::Vertex;
 use ash::ext::debug_utils;
@@ -49,7 +52,8 @@ pub struct Renderer {
     camera: Camera,
     mesh: Mesh,
 
-    fence: vk::Fence,
+    frame_workers: Vec<FrameWorker>,
+    pipeline_manager: PipelineManager,
 }
 
 impl Renderer {
@@ -159,8 +163,9 @@ impl Renderer {
         let mut vulkan_12_features =
             vk::PhysicalDeviceVulkan12Features::default().buffer_device_address(true);
 
-        let mut vulkan_13_features =
-            vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
+        let mut vulkan_13_features = vk::PhysicalDeviceVulkan13Features::default()
+            .dynamic_rendering(true)
+            .synchronization2(true);
 
         let device_queue_create_infos = [device_queue_create_info];
 
@@ -303,7 +308,7 @@ impl Renderer {
         );
 
         let swapchain_images = unsafe { swapchain_loader.get_swapchain_images(swapchain).unwrap() };
-        let swapchain_image_views = swapchain_images
+        let swapchain_image_views: Vec<vk::ImageView> = swapchain_images
             .iter()
             .map(|&image| {
                 let image_view_create_info = vk::ImageViewCreateInfo::default()
@@ -334,10 +339,29 @@ impl Renderer {
             })
             .collect();
 
-        let graphics_queue = unsafe { device.get_device_queue(graphics_queue_family_index, 0) };
-
         let mut allocator = Self::create_allocator(&instance, &device, physical_device);
 
+        let mut pipeline_manager =
+            PipelineManager::new(device.clone(), surface_format.format, render_area);
+
+        // TODO: Remove device clone
+        let frame_workers = swapchain_images
+            .iter()
+            .zip(swapchain_image_views.iter())
+            .map(|(&image, &image_view)| {
+                FrameWorker::new(
+                    device.clone(),
+                    &mut allocator,
+                    &mut pipeline_manager,
+                    image,
+                    image_view,
+                    graphics_queue_family_index,
+                    &render_area,
+                )
+            })
+            .collect();
+
+        let graphics_queue = unsafe { device.get_device_queue(graphics_queue_family_index, 0) };
         let command_pool = Self::create_command_pool(&device, graphics_queue_family_index);
 
         let descriptor_set_layout = Self::create_descriptor_set_layout(&device);
@@ -365,15 +389,6 @@ impl Renderer {
             ],
             vec![0, 1, 2, 2, 1, 3],
         );
-
-        let fence = unsafe {
-            device
-                .create_fence(
-                    &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
-                    None,
-                )
-                .unwrap()
-        };
 
         Self {
             _entry: entry,
@@ -409,10 +424,12 @@ impl Renderer {
                 100.0,
             ),
             mesh,
-            fence,
+            frame_workers,
+            pipeline_manager,
         }
     }
 
+    // TODO: Some helper library
     fn create_semaphore(&self) -> vk::Semaphore {
         let create_info = vk::SemaphoreCreateInfo::default();
 
@@ -565,85 +582,50 @@ impl Renderer {
         cmd
     }
 
-    pub fn render(&self) {
-        unsafe {
-            let acquire_image_semaphore = self.create_semaphore();
-            let queue_submit_semaphore = self.create_semaphore();
-
-            let acquire_image_semaphores = [acquire_image_semaphore];
-            let queue_submit_semaphores = [queue_submit_semaphore];
-
+    pub fn render(&mut self) {
+        let present_fence = unsafe {
             self.device
-                .wait_for_fences(&[self.fence], true, u64::MAX)
-                .unwrap();
+                .create_fence(&vk::FenceCreateInfo::default(), None)
+                .unwrap()
+        };
 
-            let fence2 = self.create_fence();
+        let acquire_image_semaphore = self.create_semaphore();
 
-            self.device.reset_fences(&[self.fence]).unwrap();
-
-            let acquire_image_result = self.swapchain_loader.acquire_next_image(
+        let acquire_image_result = unsafe {
+            self.swapchain_loader.acquire_next_image(
                 self.swapchain,
                 u64::MAX,
                 acquire_image_semaphore,
-                fence2,
-            );
+                present_fence,
+            )
+        };
 
-            match acquire_image_result {
-                Ok((image_index, b)) => {
-                    println!("{}: {}", image_index, b);
-                }
-                Err(error) => {
-                    println!("{}", error);
-                }
+        match acquire_image_result {
+            Ok((image_index, b)) => {
+                println!("{}: {}", image_index, b);
             }
-
-            let (next_image, _) = acquire_image_result.expect("Acquiring next image failed");
-
-            self.device
-                .wait_for_fences(&[fence2], true, u64::MAX)
-                .unwrap();
-
-            self.device.destroy_fence(fence2, None);
-
-            let cmd = [self.record_command_buffer(
-                self.swapchain_images[next_image as usize],
-                self.swapchain_image_views[next_image as usize],
-            )];
-
-            let submit_info = vk::SubmitInfo::default()
-                .command_buffers(&cmd)
-                .signal_semaphores(&queue_submit_semaphores)
-                .wait_semaphores(&acquire_image_semaphores)
-                .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]);
-
-            let swapchain = [self.swapchain];
-
-            let image_indices = [next_image];
-
-            let present_info = vk::PresentInfoKHR::default()
-                .wait_semaphores(&queue_submit_semaphores)
-                .swapchains(&swapchain)
-                .image_indices(&image_indices);
-
-            self.device
-                .queue_submit(self.graphics_queue, &[submit_info], self.fence)
-                .expect("Couldn't submit");
-
-            self.swapchain_loader
-                .queue_present(self.graphics_queue, &present_info)
-                .expect("Couldn't present");
-
-            self.device
-                .wait_for_fences(&[self.fence], true, u64::MAX)
-                .unwrap();
-
-            //self.device.queue_wait_idle(self.graphics_queue).unwrap();
-
-            self.device.destroy_semaphore(acquire_image_semaphore, None);
-            self.device.destroy_semaphore(queue_submit_semaphore, None);
-
-            self.device.free_command_buffers(self.command_pool, &cmd);
+            Err(error) => {
+                println!("{}", error);
+            }
         }
+
+        let (next_image, _) = acquire_image_result.expect("Acquiring next image failed");
+
+        let draw_data = DrawData::new(&self.camera, self.pipeline_manager.deferred_pipeline_layout);
+
+        if let Some(frame_worker) = self.frame_workers.get_mut(next_image as usize) {
+            frame_worker.draw(
+                &self.swapchain_loader,
+                self.swapchain,
+                present_fence,
+                next_image,
+                acquire_image_semaphore,
+                self.graphics_queue,
+                &draw_data,
+            );
+        }
+
+        unsafe { self.device.destroy_fence(present_fence, None) };
     }
 }
 
@@ -656,10 +638,10 @@ impl Drop for Renderer {
         unsafe {
             //self.device.device_wait_idle().unwrap();
 
-            self.device
-                .wait_for_fences(&[self.fence], true, u64::MAX)
-                .unwrap();
-            self.device.destroy_fence(self.fence, None);
+            // self.device
+            //     .wait_for_fences(&[self.fence], true, u64::MAX)
+            //     .unwrap();
+            // self.device.destroy_fence(self.fence, None);
 
             self.device.destroy_pipeline(self.pipeline.get(), None);
             self.device
