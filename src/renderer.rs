@@ -3,9 +3,7 @@ use crate::camera::Camera;
 use crate::draw_data::{DrawCall, DrawData, MeshData};
 use crate::frame_worker::FrameWorker;
 use crate::patched_sphere::PatchedSphere;
-use crate::pipeline::Pipeline;
 use crate::pipeline_manager::PipelineManager;
-use crate::push_constants_data::PushConstantsData;
 use ash::ext::debug_utils;
 use ash::khr::{surface, swapchain};
 use ash::{vk, Device, Entry, Instance};
@@ -41,11 +39,6 @@ pub struct Renderer {
     command_pool: vk::CommandPool,
 
     render_area: vk::Rect2D,
-
-    descriptor_set_layout: vk::DescriptorSetLayout,
-    //descriptor_set: vk::DescriptorSet,
-    pipeline_layout: vk::PipelineLayout,
-    pipeline: Pipeline,
 
     camera: Camera,
     sphere: PatchedSphere,
@@ -364,17 +357,6 @@ impl Renderer {
         let graphics_queue = unsafe { device.get_device_queue(graphics_queue_family_index, 0) };
         let command_pool = Self::create_command_pool(&device, graphics_queue_family_index);
 
-        let descriptor_set_layout = Self::create_descriptor_set_layout(&device);
-        //let descriptor_set = vk::DescriptorSet::default(); //Self::create_descriptor_set();
-
-        let pipeline_layout = Self::create_pipeline_layout(&device, &[descriptor_set_layout]);
-        let pipeline = Pipeline::new(
-            &device,
-            pipeline_layout,
-            render_area,
-            &[surface_format.format],
-        );
-
         let mut buffer_manager = BufferManager::new(&device, command_pool);
 
         let sphere = PatchedSphere::new(3);
@@ -431,10 +413,6 @@ impl Renderer {
             graphics_queue,
             command_pool,
             render_area,
-            descriptor_set_layout,
-            //descriptor_set,
-            pipeline_layout,
-            pipeline,
             camera: Camera::new(
                 0.0,
                 0.0,
@@ -457,38 +435,6 @@ impl Renderer {
         let create_info = vk::SemaphoreCreateInfo::default();
 
         unsafe { self.device.create_semaphore(&create_info, None).unwrap() }
-    }
-
-    fn create_fence(&self) -> vk::Fence {
-        let create_info = vk::FenceCreateInfo::default();
-
-        unsafe { self.device.create_fence(&create_info, None).unwrap() }
-    }
-
-    fn create_descriptor_set_layout(device: &Device) -> vk::DescriptorSetLayout {
-        let create_info = vk::DescriptorSetLayoutCreateInfo::default();
-
-        unsafe {
-            device
-                .create_descriptor_set_layout(&create_info, None)
-                .unwrap()
-        }
-    }
-
-    fn create_pipeline_layout(
-        device: &Device,
-        descriptor_set_layouts: &[vk::DescriptorSetLayout],
-    ) -> vk::PipelineLayout {
-        let push_constants = [vk::PushConstantRange::default()
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .offset(0)
-            .size(std::mem::size_of::<PushConstantsData>() as u32)];
-
-        let create_info = vk::PipelineLayoutCreateInfo::default()
-            .set_layouts(descriptor_set_layouts)
-            .push_constant_ranges(&push_constants);
-
-        unsafe { device.create_pipeline_layout(&create_info, None).unwrap() }
     }
 
     pub fn render(&mut self) {
@@ -558,20 +504,6 @@ impl Drop for Renderer {
         println!("{:?}", &self.allocator);
 
         unsafe {
-            //self.device.device_wait_idle().unwrap();
-
-            // self.device
-            //     .wait_for_fences(&[self.fence], true, u64::MAX)
-            //     .unwrap();
-            // self.device.destroy_fence(self.fence, None);
-
-            self.device.destroy_pipeline(self.pipeline.get(), None);
-            self.device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
-
-            self.device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-
             for &image_view in self.swapchain_image_views.iter() {
                 self.device.destroy_image_view(image_view, None);
             }

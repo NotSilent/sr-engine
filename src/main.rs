@@ -18,16 +18,13 @@ mod deferred_render_pass;
 mod draw_data;
 mod frame_worker;
 mod image;
-mod mesh;
 mod patched_sphere;
-mod pipeline;
 mod pipeline_manager;
 mod push_constants_data;
 mod render_pass_attachment_output;
 mod renderer;
 mod shader_manager;
 mod shadow_map_render_pass;
-mod vertex;
 
 #[derive(Default)]
 struct State {
