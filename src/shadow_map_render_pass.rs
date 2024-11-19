@@ -83,7 +83,7 @@ impl ShadowMapRenderPass {
             let push_data = PushConstantsData::new(&draw_call.model, &view, &projection);
 
             let buffers = [draw_call.mesh.positions_buffer];
-            let offsets = [0, 0]; // TODO: Why tf 2?
+            let offsets = [0];
 
             unsafe {
                 self.device.cmd_push_constants(

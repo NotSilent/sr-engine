@@ -20,7 +20,7 @@ impl Buffer {
         usage: vk::BufferUsageFlags,
     ) -> Self {
         unsafe {
-            let buffer_size = (data.len() * std::mem::size_of::<T>()) as vk::DeviceSize;
+            let buffer_size = std::mem::size_of_val(data) as vk::DeviceSize;
 
             let staging_buffer_create_info = vk::BufferCreateInfo::default()
                 .size(buffer_size)

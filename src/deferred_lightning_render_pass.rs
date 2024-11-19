@@ -34,7 +34,7 @@ impl DeferredLightningRenderPass {
     ) -> Self {
         Self {
             device: device.clone(),
-            render_area: render_area.clone(),
+            render_area: *render_area,
             deferred_render_pass_output: deferred_render_pass_output.clone(),
             shadow_map_render_pass_output: shadow_map_render_pass_output.clone(),
             material: pipeline_manager.create_deferred_lightning_material(

@@ -1,13 +1,11 @@
-use crate::buffer::VulkanResource;
+use crate::buffer_manager::BufferManager;
 use crate::camera::Camera;
-use crate::command_buffer::CommandBuffer;
-use crate::draw_data::{self, DrawData};
+use crate::draw_data::{DrawCall, DrawData, MeshData};
 use crate::frame_worker::FrameWorker;
-use crate::mesh::Mesh;
+use crate::patched_sphere::PatchedSphere;
 use crate::pipeline::Pipeline;
-use crate::pipeline_manager::{self, PipelineManager};
+use crate::pipeline_manager::PipelineManager;
 use crate::push_constants_data::PushConstantsData;
-use crate::vertex::Vertex;
 use ash::ext::debug_utils;
 use ash::khr::{surface, swapchain};
 use ash::{vk, Device, Entry, Instance};
@@ -50,10 +48,12 @@ pub struct Renderer {
     pipeline: Pipeline,
 
     camera: Camera,
-    mesh: Mesh,
+    sphere: PatchedSphere,
 
     frame_workers: Vec<FrameWorker>,
     pipeline_manager: PipelineManager,
+
+    buffer_manager: BufferManager,
 }
 
 impl Renderer {
@@ -375,20 +375,42 @@ impl Renderer {
             &[surface_format.format],
         );
 
-        let mesh = Mesh::new(
-            &device,
+        let mut buffer_manager = BufferManager::new(&device, command_pool);
+
+        let sphere = PatchedSphere::new(3);
+
+        buffer_manager.add_buffer(
+            "sphereIndices",
             &mut allocator,
             graphics_queue,
-            command_pool,
-            "sphere",
-            vec![
-                Vertex::new(-0.5, 0.0, 0.5),
-                Vertex::new(-0.5, 0.0, -0.5),
-                Vertex::new(0.5, 0.0, 0.5),
-                Vertex::new(0.5, 0.0, -0.5),
-            ],
-            vec![0, 1, 2, 2, 1, 3],
+            &sphere.indices,
+            vk::BufferUsageFlags::INDEX_BUFFER,
         );
+
+        buffer_manager.add_buffer(
+            "sphereVertices",
+            &mut allocator,
+            graphics_queue,
+            &sphere.positions,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+        );
+
+        buffer_manager.add_buffer(
+            "sphereNormals",
+            &mut allocator,
+            graphics_queue,
+            &sphere.normals,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+        );
+
+        // renderer->addBuffer("planeIndices", VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        //         planeIndices.size() * sizeof(uint32_t), planeIndices.data());
+        // renderer->addBuffer("planeVertices", VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        //         planePositions.size() * sizeof(glm::vec3),
+        //         planePositions.data());
+        // renderer->addBuffer("planeNormals", VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        //         planeNormals.size() * sizeof(glm::vec3),
+        //         planeNormals.data());
 
         Self {
             _entry: entry,
@@ -414,18 +436,19 @@ impl Renderer {
             pipeline_layout,
             pipeline,
             camera: Camera::new(
-                5.0,
-                -10.0,
-                5.0,
+                0.0,
+                0.0,
+                0.0,
                 width as f32,
                 height as f32,
                 f32::pi() / 2.0,
                 0.1,
                 100.0,
             ),
-            mesh,
+            sphere,
             frame_workers,
             pipeline_manager,
+            buffer_manager,
         }
     }
 
@@ -468,120 +491,6 @@ impl Renderer {
         unsafe { device.create_pipeline_layout(&create_info, None).unwrap() }
     }
 
-    fn record_command_buffer(
-        &self,
-        image: vk::Image,
-        image_view: vk::ImageView,
-    ) -> vk::CommandBuffer {
-        let create_info = vk::CommandBufferAllocateInfo::default()
-            .command_pool(self.command_pool)
-            .command_buffer_count(1);
-
-        let command_buffers =
-            unsafe { self.device.allocate_command_buffers(&create_info).unwrap() };
-        let cmd = command_buffers[0];
-
-        let color_attachments = [vk::RenderingAttachmentInfo::default()
-            .image_view(image_view)
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .resolve_mode(vk::ResolveModeFlags::NONE)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .clear_value(vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0.5, 0.0, 0.5, 1.0],
-                },
-            })];
-
-        let rendering_info = vk::RenderingInfo::default()
-            .render_area(self.render_area)
-            .layer_count(1)
-            .color_attachments(&color_attachments);
-
-        let begin_info = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-        unsafe {
-            self.device.begin_command_buffer(cmd, &begin_info).unwrap();
-
-            CommandBuffer::pipeline_barrier(
-                &self.device,
-                cmd,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::AccessFlags::NONE,
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                self.graphics_queue_family_index,
-                self.graphics_queue_family_index,
-                image,
-                vk::ImageAspectFlags::COLOR,
-            );
-
-            self.device.cmd_begin_rendering(cmd, &rendering_info);
-
-            let model = Matrix4::identity();
-            let push_constants_data = PushConstantsData::new(
-                &model,
-                &self.camera.get_view(),
-                self.camera.get_projection(),
-            );
-
-            self.device.cmd_push_constants(
-                cmd,
-                self.pipeline_layout,
-                vk::ShaderStageFlags::VERTEX,
-                0,
-                push_constants_data.get(),
-            );
-
-            //self.device.cmd_bind_vertex_buffers(self.triangle_buffer);
-
-            self.device.cmd_bind_pipeline(
-                cmd,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline.get(),
-            );
-
-            self.device.cmd_bind_vertex_buffers(
-                cmd,
-                0,
-                &[self.mesh.get_vertex_buffer().buffer],
-                &[0],
-            );
-            self.device.cmd_bind_index_buffer(
-                cmd,
-                self.mesh.get_index_buffer().buffer,
-                0,
-                vk::IndexType::UINT16,
-            );
-
-            self.device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
-
-            self.device.cmd_end_rendering(cmd);
-
-            CommandBuffer::pipeline_barrier(
-                &self.device,
-                cmd,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                vk::AccessFlags::NONE,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                vk::ImageLayout::PRESENT_SRC_KHR,
-                self.graphics_queue_family_index,
-                self.graphics_queue_family_index,
-                image,
-                vk::ImageAspectFlags::COLOR,
-            );
-
-            self.device.end_command_buffer(cmd).unwrap();
-        }
-
-        cmd
-    }
-
     pub fn render(&mut self) {
         let present_fence = unsafe {
             self.device
@@ -600,18 +509,33 @@ impl Renderer {
             )
         };
 
-        match acquire_image_result {
-            Ok((image_index, b)) => {
-                println!("{}: {}", image_index, b);
-            }
-            Err(error) => {
-                println!("{}", error);
-            }
-        }
+        // match acquire_image_result {
+        //     Ok((image_index, b)) => {
+        //         println!("{}: {}", image_index, b);
+        //     }
+        //     Err(error) => {
+        //         println!("{}", error);
+        //     }
+        // }
 
         let (next_image, _) = acquire_image_result.expect("Acquiring next image failed");
 
-        let draw_data = DrawData::new(&self.camera, self.pipeline_manager.deferred_pipeline_layout);
+        let mut draw_data =
+            DrawData::new(&self.camera, self.pipeline_manager.deferred_pipeline_layout);
+
+        let pipeline = self.pipeline_manager.deferred_pipeline;
+
+        let sphere_mesh = MeshData::new(
+            self.sphere.indices.len() as u32,
+            self.buffer_manager.get_buffer("sphereIndices").buffer,
+            self.buffer_manager.get_buffer("sphereVertices").buffer,
+            self.buffer_manager.get_buffer("sphereNormals").buffer,
+        );
+
+        let model = Matrix4::identity().append_translation(&nalgebra::Vector3::new(0.0, 0.0, 0.0));
+
+        let sphere_draw_call = DrawCall::new(&sphere_mesh, model, pipeline);
+        draw_data.add_draw_call(sphere_draw_call);
 
         if let Some(frame_worker) = self.frame_workers.get_mut(next_image as usize) {
             frame_worker.draw(
@@ -631,8 +555,6 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        self.mesh.release(&self.device, &mut self.allocator);
-
         println!("{:?}", &self.allocator);
 
         unsafe {

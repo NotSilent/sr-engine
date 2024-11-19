@@ -1,10 +1,5 @@
 use nalgebra::{Matrix4, Vector3};
 
-// 1/((w/h)tan(theta/2))) 0            0       0
-// 0                      tan(theta/2) 0       0
-// 0                      0            f/(f-n) -fn/(f-n)
-// 0                      0            1       0
-
 // Vulkan
 // x right
 // y bottom
@@ -12,13 +7,22 @@ use nalgebra::{Matrix4, Vector3};
 //
 // Engine
 // x right
-// y forward
-// z up
+// y up
+// z forward
+//
+// nalgebra
+// x right
+// y up
+// z forward
 
 pub struct Camera {
     transform: Matrix4<f32>,
     projection: Matrix4<f32>,
 }
+
+const TO_VULKAN_COORDINATE_SYSTEM: Matrix4<f32> = Matrix4::new(
+    -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+);
 
 impl Camera {
     pub fn new(
@@ -31,7 +35,7 @@ impl Camera {
         near: f32,
         far: f32,
     ) -> Self {
-        let mut transform = Matrix4::new_scaling(1.0);
+        let mut transform = Matrix4::identity();
         transform.append_translation_mut(&Vector3::new(x, y, z));
 
         Self {
@@ -47,24 +51,10 @@ impl Camera {
         near: f32,
         far: f32,
     ) -> Matrix4<f32> {
-        Matrix4::<f32>::new(
-            1.0 / ((width / height) * f32::tan(fov / 2.0)),
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            f32::tan(fov / 2.0),
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            far / (far - near),
-            -far * near / (far - near),
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-        )
+        let perspective = nalgebra::Matrix4::new_perspective(width / height, fov, near, far);
+
+        //TO_VULKAN_COORDINATE_SYSTEM * perspective
+        perspective
     }
 
     pub fn get_projection(&self) -> &Matrix4<f32> {
@@ -72,10 +62,13 @@ impl Camera {
     }
 
     pub fn get_view(&self) -> Matrix4<f32> {
-        static TO_VULKAN_COORDINATE_SYSTEM: Matrix4<f32> = Matrix4::new(
-            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-        );
+        //self.transform.try_inverse().unwrap()
 
-        TO_VULKAN_COORDINATE_SYSTEM * self.transform.try_inverse().unwrap()
+        TO_VULKAN_COORDINATE_SYSTEM
+            * nalgebra::Matrix4::look_at_rh(
+                &nalgebra::Point3::new(0.0, 0.0, -5.0),
+                &nalgebra::Point3::new(0.0, 0.0, 0.0),
+                &Vector3::new(0.0, 1.0, 0.0),
+            )
     }
 }

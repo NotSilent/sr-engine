@@ -65,6 +65,7 @@ void main()
     outColor = vec4(finalColor, 1.0);
 
     //outColor = vec4(shadow, shadow, shadow, 1.0);
+    //outColor = sampledShadowMap;
 }
 
 vec3 Specular(float N, float G, vec3 F, float NoV, float NoL)

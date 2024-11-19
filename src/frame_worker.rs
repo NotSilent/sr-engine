@@ -193,11 +193,10 @@ impl FrameWorker {
             .render(self.command_buffer, draw_data);
 
         // const glm::vec3 viewDirection = glm::inverse(-drawData.view)[2];
-        let view_direction = -nalgebra::Vector3::new(
-            draw_data.view[(0, 2)],
-            draw_data.view[(1, 2)],
-            draw_data.view[(2, 2)],
-        );
+
+        //let view = -draw_data.view;
+        let view = draw_data.view.try_inverse().unwrap();
+        let view_direction = nalgebra::Vector3::new(view[(2, 0)], view[(2, 1)], view[(2, 2)]);
 
         self.deferred_lightning_render_pass.render(
             self.command_buffer,

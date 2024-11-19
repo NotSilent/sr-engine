@@ -9,6 +9,7 @@ use winit::{event::WindowEvent, event_loop::EventLoop};
 use crate::renderer::Renderer;
 
 mod buffer;
+mod buffer_manager;
 mod camera;
 mod command_buffer;
 mod command_buffer_helpers;
@@ -18,6 +19,7 @@ mod draw_data;
 mod frame_worker;
 mod image;
 mod mesh;
+mod patched_sphere;
 mod pipeline;
 mod pipeline_manager;
 mod push_constants_data;

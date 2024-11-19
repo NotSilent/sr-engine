@@ -31,7 +31,7 @@ pub struct PipelineManager {
     default_sampler: vk::Sampler,
     descriptor_pool: vk::DescriptorPool,
     pub deferred_pipeline_layout: vk::PipelineLayout,
-    deferred_pipeline: vk::Pipeline,
+    pub deferred_pipeline: vk::Pipeline,
     deferred_lightning_descriptor_set_layout: vk::DescriptorSetLayout,
     deferred_lightning_pipeline_layout: vk::PipelineLayout,
     deferred_lightning_pipeline: vk::Pipeline,
@@ -343,7 +343,7 @@ impl PipelineManager {
                 &color_blend_attachments,
                 &color_attachemnt_formats,
                 deferred_pipeline_layout,
-                vk::CullModeFlags::BACK,
+                vk::CullModeFlags::NONE,
             );
         }
 
@@ -371,7 +371,7 @@ impl PipelineManager {
                 &color_blend_attachments,
                 &color_attachemnt_formats,
                 deferred_lightning_pipeline_layout,
-                vk::CullModeFlags::BACK,
+                vk::CullModeFlags::NONE,
             );
         }
 
@@ -416,7 +416,7 @@ impl PipelineManager {
                 &color_blend_attachments,
                 &color_attachemnt_formats,
                 shadow_map_layout,
-                vk::CullModeFlags::BACK,
+                vk::CullModeFlags::NONE,
             );
         }
 
@@ -523,7 +523,7 @@ impl PipelineManager {
             .depth_clamp_enable(false)
             .rasterizer_discard_enable(false)
             .polygon_mode(vk::PolygonMode::FILL)
-            .cull_mode(cull_mode.clone())
+            .cull_mode(*cull_mode)
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
             .depth_bias_enable(false)
             .depth_bias_constant_factor(0.0)
@@ -576,7 +576,7 @@ impl PipelineManager {
             .front(vk::StencilOpState::default())
             .back(vk::StencilOpState::default())
             .min_depth_bounds(0.0)
-            .max_depth_bounds(0.0)
+            .max_depth_bounds(1.0)
     }
 
     fn create_pipeline_color_blend_attachment_state() -> vk::PipelineColorBlendAttachmentState {
